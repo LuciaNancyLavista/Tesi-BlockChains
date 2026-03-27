@@ -1,12 +1,4 @@
 # WP1 - Diagrammi e Visualizzazioni
-
-Questi diagrammi possono essere visualizzati su:
-- https://mermaid.live (copia-incolla il codice)
-- GitHub (supporta Mermaid nativamente)
-- VS Code con estensione Mermaid
-
----
-
 ## 1. FIDO2 Registration Flow
 
 ```mermaid
