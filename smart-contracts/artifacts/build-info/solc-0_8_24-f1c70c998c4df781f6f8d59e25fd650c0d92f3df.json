@@ -1,0 +1,50 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_24-f1c70c998c4df781f6f8d59e25fd650c0d92f3df",
+  "solcVersion": "0.8.24",
+  "solcLongVersion": "0.8.24+commit.e11b9ed9",
+  "compilerType": "solc",
+  "userSourceNameMap": {
+    "contracts/PolicyRegistry.sol": "project/contracts/PolicyRegistry.sol",
+    "contracts/RevocationRegistry.sol": "project/contracts/RevocationRegistry.sol",
+    "contracts/TrustedIssuers.sol": "project/contracts/TrustedIssuers.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "shanghai",
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode.linkReferences",
+            "evm.bytecode.object",
+            "evm.bytecode.opcodes",
+            "evm.bytecode.sourceMap",
+            "evm.deployedBytecode.immutableReferences",
+            "evm.deployedBytecode.linkReferences",
+            "evm.deployedBytecode.object",
+            "evm.deployedBytecode.opcodes",
+            "evm.deployedBytecode.sourceMap",
+            "evm.methodIdentifiers"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/PolicyRegistry.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\n\n/**\n * @title PolicyRegistry\n * @dev Allows Relying Parties to publish their required access policies on-chain.\n */\ncontract PolicyRegistry {\n    // RP address => Policy description/JSON\n    mapping(address => string) private policies;\n\n    event PolicyPublished(address indexed rp, string policy, uint256 timestamp);\n\n    function publishPolicy(string memory _policy) public {\n        policies[msg.sender] = _policy;\n        emit PolicyPublished(msg.sender, _policy, block.timestamp);\n    }\n\n    function getPolicy(address _rp) public view returns (string memory) {\n        require(bytes(policies[_rp]).length > 0, \"No policy published for this RP\");\n        return policies[_rp];\n    }\n}\n"
+      },
+      "project/contracts/RevocationRegistry.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\n\n/**\n * @title RevocationRegistry\n * @dev Stores the URI of the Token Status List (IETF SD-JWT bitstring) for each Issuer.\n */\ncontract RevocationRegistry {\n    mapping(address => string) private issuerStatusListURIs;\n\n    event StatusListURIPublished(address indexed issuer, string uri, uint256 timestamp);\n\n    function publishStatusListURI(string memory _uri) public {\n        issuerStatusListURIs[msg.sender] = _uri;\n        emit StatusListURIPublished(msg.sender, _uri, block.timestamp);\n    }\n\n    function getStatusListURI(address _issuer) public view returns (string memory) {\n        require(bytes(issuerStatusListURIs[_issuer]).length > 0, \"No status list published for this issuer\");\n        return issuerStatusListURIs[_issuer];\n    }\n}\n"
+      },
+      "project/contracts/TrustedIssuers.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\n\n/**\n * @title TrustedIssuers\n * @dev A whitelist of trusted institutional Issuers, managed by an administrator.\n */\ncontract TrustedIssuers {\n    address public admin;\n    mapping(address => bool) private trustedIssuers;\n\n    event IssuerAdded(address indexed issuer, uint256 timestamp);\n    event IssuerRemoved(address indexed issuer, uint256 timestamp);\n\n    modifier onlyAdmin() {\n        require(msg.sender == admin, \"Only admin can perform this action\");\n        _;\n    }\n\n    constructor() {\n        admin = msg.sender;\n    }\n\n    function addIssuer(address _issuer) public onlyAdmin {\n        trustedIssuers[_issuer] = true;\n        emit IssuerAdded(_issuer, block.timestamp);\n    }\n\n    function removeIssuer(address _issuer) public onlyAdmin {\n        trustedIssuers[_issuer] = false;\n        emit IssuerRemoved(_issuer, block.timestamp);\n    }\n\n    function isTrusted(address _issuer) public view returns (bool) {\n        return trustedIssuers[_issuer];\n    }\n}\n"
+      }
+    }
+  }
+}

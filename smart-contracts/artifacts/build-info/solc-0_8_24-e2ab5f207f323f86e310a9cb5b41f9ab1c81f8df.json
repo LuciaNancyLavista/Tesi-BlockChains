@@ -1,0 +1,42 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_24-e2ab5f207f323f86e310a9cb5b41f9ab1c81f8df",
+  "solcVersion": "0.8.24",
+  "solcLongVersion": "0.8.24+commit.e11b9ed9",
+  "compilerType": "solc",
+  "userSourceNameMap": {
+    "contracts/DIDRegistry.sol": "project/contracts/DIDRegistry.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "shanghai",
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode.linkReferences",
+            "evm.bytecode.object",
+            "evm.bytecode.opcodes",
+            "evm.bytecode.sourceMap",
+            "evm.deployedBytecode.immutableReferences",
+            "evm.deployedBytecode.linkReferences",
+            "evm.deployedBytecode.object",
+            "evm.deployedBytecode.opcodes",
+            "evm.deployedBytecode.sourceMap",
+            "evm.methodIdentifiers"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/DIDRegistry.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\n\ncontract DIDRegistry {\n    struct DIDDocument {\n        address owner;\n        string publicKey; // Hex string or JWK depending on implementation\n        string serviceEndpoint;\n        uint256 createdAt;\n        uint256 updatedAt;\n        bool active;\n    }\n\n    mapping(string => DIDDocument) private dids;\n    mapping(address => string) private ownerToDid;\n\n    event DIDRegistered(address indexed owner, string did, string publicKey, uint256 timestamp);\n    event DIDUpdated(address indexed owner, string did, string publicKey, uint256 timestamp);\n    event DIDRevoked(address indexed owner, string did, uint256 timestamp);\n\n    function registerDID(string memory _did, string memory _publicKey, string memory _serviceEndpoint) public {\n        require(bytes(ownerToDid[msg.sender]).length == 0, \"Address already owns a DID\");\n        require(dids[_did].owner == address(0), \"DID already registered\");\n\n        dids[_did] = DIDDocument({\n            owner: msg.sender,\n            publicKey: _publicKey,\n            serviceEndpoint: _serviceEndpoint,\n            createdAt: block.timestamp,\n            updatedAt: block.timestamp,\n            active: true\n        });\n\n        ownerToDid[msg.sender] = _did;\n\n        emit DIDRegistered(msg.sender, _did, _publicKey, block.timestamp);\n    }\n\n    function updateDID(string memory _newPublicKey, string memory _newEndpoint) public {\n        string memory _did = ownerToDid[msg.sender];\n        require(bytes(_did).length > 0, \"No DID registered for this address\");\n        require(dids[_did].active, \"DID is revoked\");\n\n        dids[_did].publicKey = _newPublicKey;\n        dids[_did].serviceEndpoint = _newEndpoint;\n        dids[_did].updatedAt = block.timestamp;\n\n        emit DIDUpdated(msg.sender, _did, _newPublicKey, block.timestamp);\n    }\n\n    function revokeDID() public {\n        string memory _did = ownerToDid[msg.sender];\n        require(bytes(_did).length > 0, \"No DID registered for this address\");\n        require(dids[_did].active, \"DID is already revoked\");\n\n        dids[_did].active = false;\n        dids[_did].updatedAt = block.timestamp;\n\n        emit DIDRevoked(msg.sender, _did, block.timestamp);\n    }\n\n    function resolveDID(string memory _did) public view returns (DIDDocument memory) {\n        require(dids[_did].owner != address(0), \"DID not found\");\n        return dids[_did];\n    }\n\n    function isActive(string memory _did) public view returns (bool) {\n        if (dids[_did].owner == address(0)) {\n            return false;\n        }\n        return dids[_did].active;\n    }\n}\n"
+      }
+    }
+  }
+}
