@@ -58,23 +58,35 @@ function App() {
   const registerWithRP = async () => {
     setAuthStatus('loading');
     addLog("🌐 Avvio Credential Registration verso il RP...");
+    const timings = {};
     try {
+      // --- Phase 1: Selective Disclosure preparation ---
+      const t0 = performance.now();
       const presentation = wallet.createPresentation(['age', 'role']);
-      addLog(`🛡️ Wallet: Preparata selective disclosure. 'name' è stato nascosto.`);
+      timings.sdJwtPresentation = (performance.now() - t0).toFixed(3);
+      addLog(`🛡️ Wallet: Preparata selective disclosure in ${timings.sdJwtPresentation} ms. 'name' è stato nascosto.`);
 
+      // --- Challenge generation ---
+      const tChallenge0 = performance.now();
       const res1 = await fetch('/api/auth/generate-challenge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: inputUsername })
       });
       const options = await res1.json();
-      addLog("🌐 Ricevuto WebAuthn challenge 'c' dal RP.");
+      timings.challengeRoundTrip = (performance.now() - tChallenge0).toFixed(3);
+      addLog(`🌐 Ricevuto WebAuthn challenge 'c' dal RP in ${timings.challengeRoundTrip} ms.`);
 
+      // --- Phase 2: FIDO2 hardware signing (includes fidoac.js challenge modification) ---
       addLog("🔑 FIDO2: In attesa di input biometrico (fidoac.js inietterà l'hash)...");
+      const tFido0 = performance.now();
       const fidoCredential = await startRegistration(options);
-      addLog("✅ Firma hardware completata su c_modified.");
+      timings.fidoSigning = (performance.now() - tFido0).toFixed(3);
+      addLog(`✅ Firma hardware completata su c_modified in ${timings.fidoSigning} ms.`);
 
+      // --- Phase 3: Backend Composite Validation ---
       addLog("🌐 Invio payload composito al Backend...");
+      const tVerify0 = performance.now();
       const res2 = await fetch('/api/auth/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -85,13 +97,15 @@ function App() {
           disclosures: presentation.disclosures
         })
       });
-
       const finalResult = await res2.json();
-      
+      timings.backendVerification = (performance.now() - tVerify0).toFixed(3);
+      addLog(`⚙️ Validazione composita backend completata in ${timings.backendVerification} ms.`);
+
       if (finalResult.success) {
         setAuthStatus('success');
-        setRpAttributes(finalResult.attributes);
+        setRpAttributes({ ...finalResult.attributes, timings });
         addLog(`🎉 SUCCESSO: Mediator-Free binding verificato.`);
+        addLog(`📊 RIEPILOGO TEMPI: SD-JWT pres. ${timings.sdJwtPresentation}ms | challenge ${timings.challengeRoundTrip}ms | firma FIDO2 ${timings.fidoSigning}ms | verifica backend ${timings.backendVerification}ms`);
       } else {
         setAuthStatus('error');
         addLog(`❌ ERRORE RP: ${finalResult.error}`);
@@ -104,6 +118,7 @@ function App() {
       wallet.clearPresentation();
     }
   };
+
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-8 font-sans">
@@ -276,13 +291,23 @@ function App() {
               <div className="bg-emerald-900/30 border border-emerald-500/50 rounded-2xl p-6">
                 <h3 className="text-emerald-400 font-bold mb-4 text-lg">✅ Accesso Garantito</h3>
                 <p className="text-sm text-slate-300 mb-4">L'equazione b_FIDO ∧ b_challenge ∧ b_sdjwt è soddisfatta.</p>
-                <div className="text-left bg-slate-900 p-4 rounded-xl font-mono text-sm text-slate-300">
+                <div className="text-left bg-slate-900 p-4 rounded-xl font-mono text-sm text-slate-300 mb-4">
                   <p className="text-emerald-400 mb-2">// Dati rivelati in Data Minimization</p>
                   <p>"age": {rpAttributes.age}</p>
                   <p>"role": "{rpAttributes.role}"</p>
                 </div>
+                {rpAttributes.timings && (
+                  <div className="text-left bg-slate-950 p-4 rounded-xl font-mono text-xs text-slate-400 border border-slate-700">
+                    <p className="text-amber-400 mb-2">// 📊 Misurazioni di Performance (ms)</p>
+                    <p>SD-JWT Presentation (client): <span className="text-white">{rpAttributes.timings.sdJwtPresentation} ms</span></p>
+                    <p>Challenge round-trip (rete): <span className="text-white">{rpAttributes.timings.challengeRoundTrip} ms</span></p>
+                    <p>FIDO2 hw signing + fidoac.js: <span className="text-white">{rpAttributes.timings.fidoSigning} ms</span></p>
+                    <p>Backend validation (b_FIDO∧b_chal∧b_sdjwt): <span className="text-white">{rpAttributes.timings.backendVerification} ms</span></p>
+                  </div>
+                )}
               </div>
             )}
+
 
             {authStatus === 'error' && (
               <div className="bg-red-900/30 border border-red-500/50 rounded-2xl p-6">
