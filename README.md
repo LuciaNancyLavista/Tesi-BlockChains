@@ -6,21 +6,21 @@ L'obiettivo di questo software è dimostrare fattivamente un'architettura decent
 
 ---
 
-## 📋 Struttura del Progetto
+## Struttura del Progetto
 - **/backend**: Server Node.js (Express). Simula sia l'Issuer Universitario (che emette il certificato SD-JWT) sia il server del Relying Party (che verifica la firma FIDO2, il *challenge modifier* e le policy di età e ruolo).
 - **/frontend**: App React (Vite). Rappresenta l'interfaccia utente (Local Wallet per la selezione dei dati e Relying Party Portal).
 - **/smart-contracts**: Contratti Solidity testati in ambiente Hardhat. Contengono la logica on-chain di base per il DID Registry, Policy Registry e Token Status List (per la revoca dei certificati).
 
 ---
 
-## 🛠️ Prerequisiti
+## Prerequisiti
 Per eseguire il progetto in autonomia sul proprio PC è necessario aver installato:
 - [Node.js](https://nodejs.org/) (versione 18 o superiore)
 - Git (per clonare il repository)
 
 ---
 
-## 🚀 Istruzioni di Avvio Rapido
+## Istruzioni di Avvio Rapido
 
 Per provare il sistema, seguire i passaggi sottostanti aprendo tre finestre del terminale differenti.
 
@@ -55,7 +55,7 @@ Il terminale vi restituirà un indirizzo univoco (es. `https://ac12345.lhr.life`
 
 ---
 
-## 🧪 Esecuzione Test Smart Contracts
+## Esecuzione Test Smart Contracts
 I contratti Solidity sono corredati di test automatici che ne validano il funzionamento.
 Per eseguirli (opzionale):
 ```bash
