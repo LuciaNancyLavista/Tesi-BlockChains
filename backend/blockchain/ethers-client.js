@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
-// Connect to local Hardhat node
-const provider = new ethers.JsonRpcProvider('http://127.0.0.1:8545');
+// Connect to public Sepolia node (as declared in the thesis)
+const provider = new ethers.JsonRpcProvider('https://ethereum-sepolia-rpc.publicnode.com');
 
 // Mock ABIs based on the contracts we wrote
 const DID_REGISTRY_ABI = [
@@ -17,10 +17,10 @@ const POLICY_REGISTRY_ABI = [
     "function getPolicy(address _rp) view returns (string)"
 ];
 
-// Contract addresses will need to be updated after deployment
-let didRegistryAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
-let trustedIssuersAddress = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
-let policyRegistryAddress = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
+// Contract addresses on Sepolia Testnet
+let didRegistryAddress = "0x013bd8e73c6882331feaf18039094d9922eeaeed";
+let trustedIssuersAddress = "0x7ca28469468d7d4959595ee42ec235f7ff6c4be3";
+let policyRegistryAddress = "0xeff80c2a3299edfb3c2e8d6a065d1c53cf59d0d1";
 
 export function setContractAddresses(did, trusted, policy) {
     didRegistryAddress = did;
