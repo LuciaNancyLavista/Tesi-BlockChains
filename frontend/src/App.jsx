@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { startRegistration } from '@simplewebauthn/browser';
+import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 import { initFidoAC } from './fidoac.js';
 import { LocalWallet } from './Wallet.js';
-import { Smartphone, Globe, ShieldCheck, Key, Fingerprint, FileBadge } from 'lucide-react';
+import { Smartphone, Globe, ShieldCheck, Key, Fingerprint, FileBadge, LogIn } from 'lucide-react';
 
 // Initialize the monkey-patch
 initFidoAC();
@@ -12,7 +12,9 @@ function App() {
   const [log, setLog] = useState([]);
   const [hasCredential, setHasCredential] = useState(false);
   const [authStatus, setAuthStatus] = useState('idle'); // idle, loading, success, error
+  const [loginStatus, setLoginStatus] = useState('idle'); // idle, loading, success
   const [rpAttributes, setRpAttributes] = useState(null);
+  const [loginTimings, setLoginTimings] = useState(null);
   const [inputAge, setInputAge] = useState(24);
   const [inputRole, setInputRole] = useState('Student');
   const [inputUsername, setInputUsername] = useState('mario_rossi');
@@ -116,6 +118,45 @@ function App() {
       addLog("❌ Registration error: " + e.message);
     } finally {
       wallet.clearPresentation();
+    }
+  };
+
+  const loginWithFIDO2 = async () => {
+    setLoginStatus('loading');
+    addLog("🔄 Starting Standard FIDO2 Login (no SD-JWT, no fidoac.js interception)...");
+    const t0 = performance.now();
+    try {
+      const res1 = await fetch('/api/auth/generate-login-challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: inputUsername })
+      });
+      const options = await res1.json();
+      if (!res1.ok) { addLog("❌ Login error: " + options.error); setLoginStatus('idle'); return; }
+
+      addLog("🔑 FIDO2: Awaiting biometric input (fidoac.js does NOT intercept this call)...");
+      const fidoAssertion = await startAuthentication(options);
+
+      const res2 = await fetch('/api/auth/verify-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: inputUsername, fidoAssertion })
+      });
+      const result = await res2.json();
+      const elapsed = (performance.now() - t0).toFixed(0);
+
+      if (result.success) {
+        setLoginStatus('success');
+        setLoginTimings(elapsed);
+        addLog(`✅ Standard FIDO2 Login successful in ${elapsed} ms total — 0 ms SD-JWT overhead.`);
+        addLog(`📊 Verified attributes from DB (Issuer NOT contacted): age=${result.attributes.age}, role=${result.attributes.role}`);
+      } else {
+        setLoginStatus('idle');
+        addLog("❌ Login failed: " + result.error);
+      }
+    } catch (e) {
+      setLoginStatus('idle');
+      addLog("❌ Login error: " + e.message);
     }
   };
 
@@ -297,7 +338,7 @@ function App() {
                   <p>"role": "{rpAttributes.role}"</p>
                 </div>
                 {rpAttributes.timings && (
-                  <div className="text-left bg-slate-950 p-4 rounded-xl font-mono text-xs text-slate-400 border border-slate-700">
+                  <div className="text-left bg-slate-950 p-4 rounded-xl font-mono text-xs text-slate-400 border border-slate-700 mb-4">
                     <p className="text-amber-400 mb-2">// 📊 Performance Measurements (ms)</p>
                     <p>SD-JWT Presentation (client): <span className="text-white">{rpAttributes.timings.sdJwtPresentation} ms</span></p>
                     <p>Challenge round-trip (network): <span className="text-white">{rpAttributes.timings.challengeRoundTrip} ms</span></p>
@@ -305,6 +346,33 @@ function App() {
                     <p>Backend validation (b_FIDO∧b_chal∧b_sdjwt): <span className="text-white">{rpAttributes.timings.backendVerification} ms</span></p>
                   </div>
                 )}
+
+                {/* Standard FIDO2 Login — subsequent session */}
+                <div className="border-t border-emerald-700/50 pt-4 mt-2">
+                  <p className="text-xs text-slate-400 mb-3">Credential Registration complete. Simulate a subsequent login with standard FIDO2 — no SD-JWT, no fidoac.js:</p>
+                  {loginStatus === 'idle' && (
+                    <button
+                      onClick={loginWithFIDO2}
+                      className="bg-blue-700 hover:bg-blue-600 text-white font-semibold py-2 px-5 rounded-xl transition-all flex items-center gap-2 mx-auto text-sm"
+                    >
+                      <LogIn className="w-4 h-4" />
+                      Standard FIDO2 Login (0 ms overhead)
+                    </button>
+                  )}
+                  {loginStatus === 'loading' && (
+                    <div className="animate-pulse text-blue-400 flex items-center justify-center gap-2 text-sm">
+                      <Key className="w-4 h-4 animate-spin" /> Standard FIDO2 in progress...
+                    </div>
+                  )}
+                  {loginStatus === 'success' && (
+                    <div className="bg-blue-900/30 border border-blue-500/50 rounded-xl p-4 text-left font-mono text-xs">
+                      <p className="text-blue-300 font-bold mb-2">✅ Standard FIDO2 Login — {loginTimings} ms total</p>
+                      <p className="text-slate-400">SD-JWT overhead: <span className="text-white font-bold">0 ms</span></p>
+                      <p className="text-slate-400">Issuer contacted: <span className="text-white font-bold">NO</span></p>
+                      <p className="text-slate-400">fidoac.js active: <span className="text-white font-bold">NO</span></p>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

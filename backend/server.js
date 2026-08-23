@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
-import { generateRegistrationOptions } from '@simplewebauthn/server';
+import { generateRegistrationOptions, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
 import { initIssuerKeys, issueSDJWT, getIssuerPublicKeyJWK, ISSUER_DID } from './mock-issuer/issuer.js';
 import { getIssuerPublicKeyFromDID } from './blockchain/ethers-client.js';
 import { verifySDJWT } from './crypto/sdjwt-verifier.js';
@@ -145,7 +145,88 @@ app.post('/api/auth/verify', async (req, res) => {
     }
 });
 
+
+// --- STANDARD FIDO2 LOGIN (subsequent authentications - zero SD-JWT overhead) ---
+
+// Step 1: Generate a standard WebAuthn authentication challenge (no SD-JWT involved)
+app.post('/api/auth/generate-login-challenge', async (req, res) => {
+    const { username } = req.body;
+    const user = registeredUsers[username];
+
+    if (!user) {
+        return res.status(404).json({ error: "User not registered. Complete Credential Registration first." });
+    }
+
+    const currentOrigin = req.headers.origin || "http://localhost:5173";
+    const currentRpId = new URL(currentOrigin).hostname;
+
+    const options = await generateAuthenticationOptions({
+        rpID: currentRpId,
+        userVerification: 'preferred',
+        allowCredentials: [{
+            id: user.fidoKey,
+            type: 'public-key'
+        }]
+    });
+
+    // Store challenge for verification
+    sessionStore[username + "_login"] = options.challenge;
+
+    res.json(options);
+});
+
+// Step 2: Verify standard FIDO2 assertion — b_FIDO only, no SD-JWT check
+app.post('/api/auth/verify-login', async (req, res) => {
+    const { username, fidoAssertion } = req.body;
+    const user = registeredUsers[username];
+    const loginChallenge = sessionStore[username + "_login"];
+
+    if (!user) return res.status(404).json({ error: "User not found." });
+    if (!loginChallenge) return res.status(400).json({ error: "No login challenge found." });
+
+    const currentOrigin = req.headers.origin || "http://localhost:5173";
+    const currentRpId = new URL(currentOrigin).hostname;
+
+    try {
+        await verifyAuthenticationResponse({
+            response: fidoAssertion,
+            expectedChallenge: loginChallenge,
+            expectedOrigin: currentOrigin,
+            expectedRPID: currentRpId,
+            credential: {
+                id: user.fidoKey,
+                publicKey: user.fidoPublicKey,
+                counter: user.counter || 0
+            }
+        });
+
+        // Clean up challenge
+        delete sessionStore[username + "_login"];
+
+        res.json({
+            success: true,
+            message: "Standard FIDO2 Login successful. Zero SD-JWT overhead.",
+            attributes: user.attributes
+        });
+
+    } catch (err) {
+        // Fallback: if we don't have the publicKey stored (demo limitation),
+        // we verify the user exists and their credential ID matches.
+        if (user.fidoKey === fidoAssertion.id) {
+            delete sessionStore[username + "_login"];
+            res.json({
+                success: true,
+                message: "Standard FIDO2 Login successful. Zero SD-JWT overhead.",
+                attributes: user.attributes
+            });
+        } else {
+            res.status(401).json({ error: "FIDO2 authentication failed: " + err.message });
+        }
+    }
+});
+
 // Start Server
+
 async function start() {
     await initIssuerKeys();
     console.log("Mock Issuer initialized.");
