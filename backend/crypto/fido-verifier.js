@@ -19,14 +19,14 @@ export async function verifyFIDOSignature(credential, expectedChallenge, expecte
     }
 }
 
-// In the thesis, the wallet sends c_modified = c || SHA-256(SD-JWT_pres)
+// In the thesis, the wallet sends c_modified = c || SHA-256(KB-JWT)
 // We need to verify that the challenge signed by FIDO matches what we expect
-export function buildExpectedModifiedChallenge(originalChallenge, sdJwtPresentation) {
+export function buildExpectedModifiedChallenge(originalChallenge, kbJwt) {
     // 1. Get raw bytes of the original challenge
     const challengeBuffer = Buffer.from(originalChallenge, 'base64url');
     
-    // 2. Get raw bytes of the SD-JWT hash
-    const hashBuffer = crypto.createHash('sha256').update(sdJwtPresentation).digest(); // raw bytes
+    // 2. Get raw bytes of the KB-JWT hash
+    const hashBuffer = crypto.createHash('sha256').update(kbJwt).digest(); // raw bytes
     
     // 3. c_modified = c || hash (byte concatenation)
     const combinedBuffer = Buffer.concat([challengeBuffer, hashBuffer]);
