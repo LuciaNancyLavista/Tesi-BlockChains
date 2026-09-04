@@ -20,9 +20,13 @@ export function getIssuerPublicKeyJWK() {
     return issuerPublicKey;
 }
 
-// Generates a mock SD-JWT for the user
-export async function issueSDJWT(userAttributes) {
+// Generates a mock SD-JWT for the user.
+// holderPublicKeyJwk: the Holder's ECDSA P-256 public key (JWK).
+// The Issuer embeds it as cnf.jwk so that only the legitimate Holder
+// (possessor of the corresponding private key) can produce a valid KB-JWT.
+export async function issueSDJWT(userAttributes, holderPublicKeyJwk) {
     if (!issuerPrivateKey) throw new Error("Issuer keys not initialized");
+    if (!holderPublicKeyJwk) throw new Error("holderPublicKeyJwk is required for SD-JWT Key Binding");
 
     const disclosures = {};
     const sdHashes = [];
@@ -43,8 +47,13 @@ export async function issueSDJWT(userAttributes) {
 
     const idx = Math.floor(Math.random() * 1000); // Random bit index for unlinkability
 
-    // Create the base JWT
+    // Create the base JWT — now includes cnf.jwk for SD-JWT Key Binding
     const jwt = await new SignJWT({ 
+        // cnf (confirmation) claim: binds this SD-JWT to the Holder's public key.
+        // Only the possessor of the corresponding holderPrivKey can produce a valid KB-JWT.
+        cnf: {
+            jwk: holderPublicKeyJwk
+        },
         _sd: sdHashes,
         status: {
             status_list: {
@@ -66,3 +75,4 @@ export async function issueSDJWT(userAttributes) {
         tslIndex: idx
     };
 }
+

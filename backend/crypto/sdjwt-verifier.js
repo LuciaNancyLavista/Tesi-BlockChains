@@ -46,7 +46,9 @@ export async function verifySDJWT(sdJwt, disclosures, issuerPublicKeyJWK) {
         return {
             verified: true,
             attributes: verifiedAttributes,
-            issuerDid: payload.iss
+            issuerDid: payload.iss,
+            cnfJwk: payload.cnf?.jwk || null,  // Return cnf.jwk for b_cnf verification
+            tslIndex: payload.status?.status_list?.idx
         };
         
     } catch (error) {
@@ -54,3 +56,53 @@ export async function verifySDJWT(sdJwt, disclosures, issuerPublicKeyJWK) {
         return { verified: false, error: error.message };
     }
 }
+
+// ─── b_cnf: Key Binding JWT Verification ─────────────────────────────────────
+//
+// Verifies that the KB-JWT was signed by the holder of cnf.jwk embedded in the SD-JWT.
+// This proves that the presenter is the legitimate credential owner, not just someone
+// who obtained a copy of the SD-JWT.
+//
+// Verification steps:
+//   1. Import cnf.jwk from the SD-JWT payload as an ECDSA P-256 public key
+//   2. Verify the KB-JWT signature against that key
+//   3. Verify that kbJwtPayload.sd_hash == SHA-256(sdJwtPresentation)
+//      (ensures the KB-JWT is bound to this specific credential presentation)
+//
+// An attacker who obtains someone else's SD-JWT cannot produce a valid KB-JWT
+// because they do not possess the corresponding holderPrivKey.
+export async function verifyCnf(cnfJwk, kbJwt, sdJwtPresentation) {
+    try {
+        if (!cnfJwk) {
+            throw new Error('SD-JWT does not contain a cnf claim. Key Binding is required.');
+        }
+
+        // 1. Import holder's public key from cnf.jwk
+        const holderPublicKey = await importJWK(cnfJwk, 'ES256');
+
+        // 2. Verify KB-JWT signature (jose handles ES256 verification)
+        const { payload: kbPayload } = await jwtVerify(kbJwt, holderPublicKey, {
+            typ: 'kb+jwt'
+        });
+
+        // 3. Verify sd_hash: KB-JWT must commit to this specific SD-JWT presentation
+        const expectedSdHash = crypto
+            .createHash('sha256')
+            .update(sdJwtPresentation)
+            .digest('base64url');
+
+        if (kbPayload.sd_hash !== expectedSdHash) {
+            throw new Error(
+                `KB-JWT sd_hash mismatch: expected ${expectedSdHash}, got ${kbPayload.sd_hash}`
+            );
+        }
+
+        console.log('[b_cnf] KB-JWT verified. Holder legitimacy confirmed.');
+        return { verified: true, kbPayload };
+
+    } catch (error) {
+        console.error('[b_cnf] KB-JWT verification failed:', error.message);
+        return { verified: false, error: error.message };
+    }
+}
+

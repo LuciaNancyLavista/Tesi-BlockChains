@@ -69,4 +69,32 @@ describe("PolicyRegistry", async function () {
       registry.read.getPolicy([getAddress(otherClient.account.address)])
     );
   });
+
+  it("Should not allow a non-owner to overwrite another RP's policy", async function () {
+    // rpClient publishes a policy
+    await rpClient.writeContract({
+      address: registry.address,
+      abi: registry.abi,
+      functionName: "publishPolicy",
+      args: [POLICY_1],
+    });
+
+    // otherClient attempts to overwrite rpClient's policy by passing rpClient's address.
+    // The contract uses msg.sender as the mapping key, so this call only writes
+    // to otherClient's own entry and cannot touch rpClient's slot.
+    await otherClient.writeContract({
+      address: registry.address,
+      abi: registry.abi,
+      functionName: "publishPolicy",
+      args: [POLICY_2],
+    });
+
+    // rpClient's policy must remain unchanged
+    const retrievedPolicy = await registry.read.getPolicy([rpAddress]);
+    assert.equal(retrievedPolicy, POLICY_1);
+
+    // otherClient now has its own independent policy entry
+    const otherPolicy = await registry.read.getPolicy([getAddress(otherClient.account.address)]);
+    assert.equal(otherPolicy, POLICY_2);
+  });
 });

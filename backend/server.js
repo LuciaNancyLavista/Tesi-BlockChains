@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { generateRegistrationOptions, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
 import { initIssuerKeys, issueSDJWT, getIssuerPublicKeyJWK, ISSUER_DID } from './mock-issuer/issuer.js';
 import { getIssuerPublicKeyFromDID } from './blockchain/ethers-client.js';
-import { verifySDJWT } from './crypto/sdjwt-verifier.js';
+import { verifySDJWT, verifyCnf } from './crypto/sdjwt-verifier.js';
 import { buildExpectedModifiedChallenge, verifyFIDOSignature } from './crypto/fido-verifier.js';
 
 const app = express();
@@ -22,7 +22,14 @@ import { revokedIndices } from './mock-issuer/state.js';
 
 // --- MOCK ISSUER ENDPOINTS ---
 app.post('/api/mock-issue', async (req, res) => {
-    // Simulate a user asking the university for an SD-JWT credential
+    // The Issuer receives the Holder's public key JWK to embed in the SD-JWT cnf claim.
+    // This creates a cryptographic binding: only the possessor of the corresponding
+    // private key (holderPrivKey) can produce a valid Key Binding JWT (KB-JWT).
+    const { holderPublicKey } = req.body;
+    if (!holderPublicKey) {
+        return res.status(400).json({ error: 'holderPublicKey is required for SD-JWT Key Binding' });
+    }
+
     const attributes = {
         name: req.body.name || "Nancy",
         age: req.body.age || 24,
@@ -31,7 +38,7 @@ app.post('/api/mock-issue', async (req, res) => {
     };
 
     try {
-        const credential = await issueSDJWT(attributes);
+        const credential = await issueSDJWT(attributes, holderPublicKey);
         res.json(credential);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -84,42 +91,53 @@ app.post('/api/auth/generate-challenge', async (req, res) => {
     res.json(options);
 });
 
-// Phase 3: Composite Verification (b_FIDO ∧ b_challenge ∧ b_sdjwt)
+// Phase 3: Composite Verification (b_FIDO ∧ b_challenge ∧ b_sdjwt ∧ b_cnf)
 app.post('/api/auth/verify', async (req, res) => {
-    const { username, fidoCredential, sdjwt, disclosures } = req.body;
+    const { username, fidoCredential, sdjwt, disclosures, kbJwt } = req.body;
     const originalChallenge = sessionStore[username];
 
     if (!originalChallenge) return res.status(400).json({ error: "No challenge found" });
+    if (!kbJwt) return res.status(400).json({ error: "KB-JWT is required for Key Binding verification (b_cnf)" });
 
     try {
         // 1. Resolve Issuer DID from Blockchain (b_sdjwt part 1)
-        // For the demo, we fall back to the in-memory key if the blockchain node is down
         let issuerJwk = await getIssuerPublicKeyFromDID(ISSUER_DID);
         if (!issuerJwk) {
             console.log("Fallback: using in-memory mock issuer key (Blockchain not connected)");
             issuerJwk = getIssuerPublicKeyJWK();
         }
 
-        // 2. Verify SD-JWT (b_sdjwt part 2)
+        // 2. Verify SD-JWT (b_sdjwt): Issuer signature + selective disclosures + revocation
+        //    Also extracts cnf.jwk for the subsequent b_cnf check.
         const sdjwtResult = await verifySDJWT(sdjwt, disclosures, issuerJwk);
         if (!sdjwtResult.verified) {
-            return res.status(401).json({ error: "SD-JWT verification failed: " + sdjwtResult.error });
+            return res.status(401).json({ error: "SD-JWT verification failed (b_sdjwt): " + sdjwtResult.error });
         }
 
-        // 3. Compute c_modified (b_challenge)
-        // In the thesis: c_modified = c || SHA-256(SD-JWT_pres)
-        // Here we hash the base JWT string that was presented
-        const expectedChallenge = buildExpectedModifiedChallenge(originalChallenge, sdjwt);
+        // 3. Verify Key Binding JWT (b_cnf):
+        //    Checks that the KB-JWT is signed by the key in cnf.jwk (i.e., holderPrivKey),
+        //    and that its sd_hash matches SHA-256(SD-JWT_pres).
+        //    This proves the presenter is the legitimate Holder of this SD-JWT.
+        const cnfResult = await verifyCnf(sdjwtResult.cnfJwk, kbJwt, sdjwt);
+        if (!cnfResult.verified) {
+            return res.status(401).json({ error: "Key Binding verification failed (b_cnf): " + cnfResult.error });
+        }
 
-        // 4. Verify FIDO Signature (b_FIDO)
+        // 4. Compute c_modified (b_challenge):
+        //    Updated formula: c_modified = c || SHA-256(KB-JWT)
+        //    The KB-JWT already contains sd_hash = SHA-256(SD-JWT_pres), so the FIDO2 signature
+        //    transitively covers the entire chain: FIDO2_sig → KB-JWT → SD-JWT_pres
+        const expectedChallenge = buildExpectedModifiedChallenge(originalChallenge, kbJwt);
+
+        // 5. Verify FIDO2 Signature (b_FIDO): proves physical device presence
         const currentOrigin = req.headers.origin || "http://localhost:5173";
         const fidoResult = await verifyFIDOSignature(fidoCredential, expectedChallenge, currentOrigin);
         
         if (!fidoResult) {
-            return res.status(401).json({ error: "FIDO2 signature verification failed. Did fidoac.js modify the challenge correctly?" });
+            return res.status(401).json({ error: "FIDO2 signature verification failed (b_FIDO). Did fidoac.js inject SHA-256(KB-JWT) correctly?" });
         }
 
-        // 5. Check Access Policy (RP Policy Enforcement)
+        // 6. Check Access Policy (RP Policy Enforcement)
         const { age, role } = sdjwtResult.attributes;
         if (!age || age < 18) {
             return res.status(403).json({ error: "Accesso Negato: La policy del RP richiede la maggiore età (age >= 18)." });
@@ -128,15 +146,17 @@ app.post('/api/auth/verify', async (req, res) => {
             return res.status(403).json({ error: "Accesso Negato: La policy del RP richiede il ruolo 'Student'." });
         }
 
-        // 6. Success! Store user
+        // 7. All checks passed: b_FIDO ∧ b_challenge ∧ b_sdjwt ∧ b_cnf = True
+        //    Store user with the FIDO2 credential ID for subsequent standard logins
         registeredUsers[username] = {
             attributes: sdjwtResult.attributes,
-            fidoKey: fidoCredential.id
+            fidoKey: fidoCredential.id,
+            tslIndex: sdjwtResult.tslIndex
         };
 
         res.json({
             success: true,
-            message: "Authentication successful! Mediator-Free binding achieved.",
+            message: "Authentication successful. Composite validation satisfied: b_FIDO ∧ b_challenge ∧ b_sdjwt ∧ b_cnf.",
             attributes: sdjwtResult.attributes
         });
 
@@ -183,6 +203,11 @@ app.post('/api/auth/verify-login', async (req, res) => {
 
     if (!user) return res.status(404).json({ error: "User not found." });
     if (!loginChallenge) return res.status(400).json({ error: "No login challenge found." });
+
+    // Check revocation list for subsequent logins
+    if (user.tslIndex !== undefined && revokedIndices.has(user.tslIndex)) {
+        return res.status(401).json({ error: "Accesso Negato: La credenziale SD-JWT associata a questo account è stata REVOCATA." });
+    }
 
     const currentOrigin = req.headers.origin || "http://localhost:5173";
     const currentRpId = new URL(currentOrigin).hostname;
